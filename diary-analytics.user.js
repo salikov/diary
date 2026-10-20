@@ -5,6 +5,8 @@
 // @description  Показывает оценки и средний балл по четвертям в дневнике
 // @match        https://diary.e-schools.by/*
 // @include      https://diary.e-schools.by/*
+// @updateURL    https://raw.githubusercontent.com/salikov/diary/refs/heads/main/diary-analytics.user.js
+// @downloadURL  https://raw.githubusercontent.com/salikov/diary/refs/heads/main/diary-analytics.user.js
 // @noframes
 // @run-at       document-idle
 // @grant        none
