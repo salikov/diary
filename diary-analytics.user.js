@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Дневник: Аналитика оценок
 // @namespace    https://diary.e-schools.by/userscripts/analytics
-// @version      0.1.4
+// @version      0.1.5
 // @description  Показывает оценки и средний балл по четвертям в дневнике
 // @match        https://diary.e-schools.by/*
 // @include      https://diary.e-schools.by/*
@@ -341,7 +341,7 @@
     }
   }
 
-  async function fetchParent() {
+  async function fetchProfile() {
     const auth = inspectAuthStorage();
     authToken = auth.token;
 
@@ -522,9 +522,54 @@
     ui.tableWrap.hidden = false;
   }
 
+  function getProfileClassId(profile) {
+    const candidates = [
+      profile.class && profile.class.uuid,
+      profile.classe && profile.classe.uuid,
+      profile.class_uuid,
+      profile.classUuid,
+      ...asArray(profile, 'classes').map(item => item && item.uuid)
+    ];
+    return candidates.find(value => typeof value === 'string' && value.trim()) || null;
+  }
+
+  function getStudentsForProfile(profile) {
+    const roles = asArray(profile, 'roles');
+    const personKind = typeof profile.person_kind === 'string' ? profile.person_kind.toUpperCase() : '';
+    const isStudent = roles.includes('STUDENT') || personKind === 'STUDENT';
+    const isParent = roles.includes('PARENT') || personKind === 'PARENT';
+
+    if (isStudent) {
+      const student = {
+        profile_id: profile.profile_id,
+        school_id: profile.school_id || profile.our_school_id,
+        full_name: profile.full_name,
+        class_uuid: getProfileClassId(profile)
+      };
+      if (!student.profile_id || !student.school_id) {
+        throw new Error('В профиле ученика отсутствует идентификатор школы или ученика.');
+      }
+      return { students: [student], isStudent: true };
+    }
+
+    if (!isParent) throw new Error('Не удалось определить роль аккаунта по ответу дневника.');
+    return {
+      students: asArray(profile, 'students_for_parent')
+        .filter(student => student && student.profile_id && student.school_id),
+      isStudent: false
+    };
+  }
+
   async function fetchClassAssignments(student, dates, sequence) {
     const chunks = makeDateChunks(dates);
     const classByDate = Object.create(null);
+    if (student.class_uuid) {
+      for (let date = dates.start; date <= dates.end; date = addDays(date, 1)) {
+        classByDate[date] = student.class_uuid;
+      }
+      return classByDate;
+    }
+
     let nextIndex = 0;
     let loaded = 0;
     const workers = Math.min(3, chunks.length);
@@ -612,10 +657,9 @@
     showStatus('Подключаемся к дневнику', 'Получаем список учеников и оценки за четверть.', true);
 
     try {
-      const parent = await fetchParent();
+      const profile = await fetchProfile();
       if (sequence !== loadSequence) return;
-      const students = asArray(parent, 'students_for_parent')
-        .filter(student => student && student.profile_id && student.school_id);
+      const { students, isStudent } = getStudentsForProfile(profile);
       if (!students.length) throw new Error('В аккаунте не найдено ни одного ученика.');
 
       const siteActiveChild = readDiaryAuth()?.person?.activeChild;
@@ -629,8 +673,8 @@
         ui.student.append(option);
       }
       ui.student.value = selected.profile_id;
-      ui.studentField.hidden = students.length < 2;
-      localStorage.setItem(STUDENT_KEY, selected.profile_id);
+      ui.studentField.hidden = isStudent || students.length < 2;
+      if (!isStudent) localStorage.setItem(STUDENT_KEY, selected.profile_id);
 
       const [weeksResponse, classByDate] = await Promise.all([
         apiRequest('/education/diary/time_activities/week_activities'),
